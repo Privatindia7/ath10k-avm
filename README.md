@@ -7,14 +7,18 @@ a Qualcomm Atheros **QCA9377** with the high-latency (HL) firmware; AVM only shi
 > Unofficial, unsupported, no affiliation with AVM or Qualcomm. "FRITZ!" is a trademark of AVM.
 > You use this at your own risk; it replaces your system's `ath10k` modules (see
 > [Caveats](#caveats)).
+>
+> **Status: works on 5 GHz. 2.4 GHz does not work reliably** (association times out, see
+> [What does not work](#what-does-not-work--not-known)). If you can only use a 2.4 GHz network
+> this is not a solution yet.
 
 ## What works
 
 Tested on **Fedora 44 / Nobara 44, kernel 7.2.9, x86_64, NetworkManager, one FRITZ!Box on 5 GHz
 (channel 52, 80 MHz)**:
 
-- scan, associate, DHCP, normal use as a station; encrypted connection with management frame
-  protection
+- scan, associate (**5 GHz only**), DHCP, normal use as a station; encrypted connection with
+  management frame protection
 - `nmcli radio wifi off/on`, `ip link set wlan0 down/up`, module reload, reboot, autoload
 - rebuild of the modules by a systemd service after a kernel update (verified once)
 - TCP download with `ack_thin=2`: **~40 Mbit/s on average, 32–47 Mbit/s observed** (without the
@@ -24,12 +28,20 @@ Tested on **Fedora 44 / Nobara 44, kernel 7.2.9, x86_64, NetworkManager, one FRI
   TCP retransmissions with the filter on (~0 with it off, where the stick is the bottleneck).
 - CPU: ~1 % of one core at 45 Mbit/s; memory: about 1 MB (module 0.83 MB plus buffers)
 
-## What does not / not known
+## What does not work / not known
 
-- **Not tested:** 2.4 GHz association (channels are scanned), AP / monitor / P2P modes,
-  suspend/resume, unplugging while connected, several sticks, Secure Boot, other distributions,
-  other kernels (the code is based on Linux v7.0.9 and was built against 7.2.9 only), IPv6 ACK
-  thinning (implemented, not explicitly verified), other access points.
+- **2.4 GHz does not work.** Tested against the 2.4 GHz radio of the same FRITZ!Box (channel 6,
+  WPA2, signal ~67 %). In five attempts on one day: four times authentication succeeded and the
+  association request timed out (3 tries), once the association succeeded and the AP dropped the
+  client 2 s later with `4WAY_HANDSHAKE_TIMEOUT`. Scanning and receiving work (the AP is listed,
+  authentication frames are answered), so it looks like our frames do not reach the AP reliably
+  on 2.4 GHz. Cause not found: not yet known whether it is the stick's TX on 2.4 GHz (TX power /
+  board data), the firmware, or router-side band steering. It was not tried against another
+  2.4 GHz access point. The 5 GHz link of the same router works.
+- **Not tested:** AP / monitor / P2P modes, suspend/resume, unplugging while connected, several
+  sticks, Secure Boot, other distributions, other kernels (the code is based on Linux v7.0.9 and
+  was built against 7.2.9 only), IPv6 ACK thinning (implemented, not explicitly verified), other
+  access points, 5 GHz channels other than 52.
 - **No TX aggregation.** The firmware sends every frame on its own (one MPDU per PPDU,
   ~300 µs of air time each). Under download load the stick can send only ~1000–1700 frames/s;
   without a workaround TCP ACKs cap the download at ~30 Mbit/s. `ack_thin` (below) works around
