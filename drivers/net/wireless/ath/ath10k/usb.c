@@ -706,15 +706,17 @@ static int ath10k_usb_hif_map_service_to_pipe(struct ath10k *ar, u16 svc_id,
  *
  * Sequences copied from USBPcap traces of the AVM Windows driver 11.3.4.0:
  *  - before BMI: diag read 0x0020c700, clear bit 22 (0x00600808 -> 0x00200808)
- *  - on disable: WMI pdev suspend (core), ~2 s idle, then diag write
+ *  - on disable: WMI pdev suspend (core), then diag write
  *    RTC_SOC_BASE + SOC_RESET_CONTROL = 0x100. The stick disconnects by itself
  *    and re-enumerates after ~3 s, the driver then probes it again.
  *    No diag read and no USB bus reset before the write: both wedge the stick.
+ *    The Windows driver idles ~2 s between suspend and write; that is not
+ *    needed (36 of 36 restart cycles with no idle), and waiting here would
+ *    hold conf_mutex and RTNL.
  */
 #define ATH10K_USB_AVM_PREBMI_ADDR	0x0020c700
 #define ATH10K_USB_AVM_PREBMI_CLR	BIT(22)
 #define ATH10K_USB_AVM_RESET_VAL	0x00000100
-#define ATH10K_USB_AVM_RESET_IDLE_MS	2000
 #define ATH10K_USB_AVM_RESET_MAX	6	/* per 60 s, loop guard */
 
 /* Module static: ar is freed on disconnect, the history must survive that. */
@@ -768,9 +770,6 @@ static void ath10k_usb_avm_soc_reset(struct ath10k *ar)
 		ath10k_warn(ar, "usb soc reset skipped: loop guard\n");
 		return;
 	}
-
-	/* Windows idles ~2 s between the suspend and the reset write */
-	msleep(ATH10K_USB_AVM_RESET_IDLE_MS);
 
 	ret = ath10k_usb_hif_diag_write(ar, RTC_SOC_BASE_ADDRESS +
 					    SOC_RESET_CONTROL_ADDRESS,

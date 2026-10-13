@@ -116,7 +116,8 @@ retransmissions increase strongly, so 2 is the useful value.
    second firmware boot is impossible without a chip reset and the reset re-enumerates the
    stick, so the firmware booted at probe is kept running and adopted by `ath10k_start()`; every
    stop resets the chip (sequence copied from the AVM Windows driver: diag read-modify-write of
-   `0x20c700`, `WMI_PDEV_SUSPEND`, ~2 s idle, diag write `0x100` to `SOC_RESET_CONTROL`).
+   `0x20c700`, `WMI_PDEV_SUSPEND`, diag write `0x100` to `SOC_RESET_CONTROL`; the ~2 s idle the
+   Windows driver adds in between is not needed, 36 of 36 restart cycles worked without it).
 2. **HL completion FIFO**: the firmware reports `msdu_id` 10/11 in every `TX_COMPL_IND`, so
    completions never match and the pending slots leak until TX stalls. It sends exactly one
    completion per data frame, in order, so they are matched against a FIFO of in-flight frames.
@@ -136,9 +137,6 @@ The reasoning behind each change (what the Windows driver does, why the download
 - Every workaround (restart/keep-alive scheme, suspend option, completion FIFO, ACK thinning)
   is gated on USB vendor `057c`; other ath10k devices, including other USB ones, keep the
   upstream code paths.
-- Restarting the stick (every `down`, suspend, firmware recovery) waits ~2 s inside the driver
-  while holding `conf_mutex` and, on interface down, the RTNL lock; other network configuration
-  stalls for that time. Whether the wait is needed at all is untested.
 - Do not expect upstream acceptance: it is a workaround for one firmware, not a general fix.
 
 ## License
