@@ -8,6 +8,19 @@ DST=/usr/src/ath10k-avm
 A=drivers/net/wireless/ath
 FW=/lib/firmware/ath10k/QCA9377/avm
 
+# The patched ath10k_core has a different struct layout than the stock one, so
+# ath10k_pci and ath10k_sdio come from the same tree and replace the stock
+# modules for every ath10k device of this machine. Refuse if there is one.
+if [ "${1:-}" != "--force" ]; then
+	other=$(find /sys/bus/pci/drivers/ath10k_pci /sys/bus/sdio/drivers/ath10k_sdio \
+		-mindepth 1 -maxdepth 1 -type l ! -name module 2>/dev/null | wc -l)
+	if [ "$other" -gt 0 ]; then
+		echo "This machine has $other PCI/SDIO ath10k device(s) that would also run on the patched" >&2
+		echo "modules (a v7.0.9 snapshot). Use '$0 --force' if that is what you want." >&2
+		exit 1
+	fi
+fi
+
 if [ ! -f "$FW/firmware-usb-5.bin" ] || [ ! -f "$FW/board.bin" ]; then
 	echo "Firmware missing in $FW (firmware-usb-5.bin, board.bin): create it with tools/make-firmware.py, see README" >&2
 	exit 1

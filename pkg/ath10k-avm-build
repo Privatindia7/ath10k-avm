@@ -23,6 +23,8 @@ make -C "$KDIR" M="$D" modules -j"$(nproc)" >"$TMP/build.log" 2>&1 || {
 	exit 1
 }
 
+# All four modules, not only core and usb: ath10k_core has a different struct
+# layout than the stock one, so stock ath10k_pci/ath10k_sdio must not be mixed in.
 MODS="ath10k_core ath10k_usb ath10k_pci ath10k_sdio"
 for m in $MODS; do
 	[ -f "$D/$m.ko" ] || { echo "ath10k-avm: $m.ko fehlt" >&2; exit 1; }

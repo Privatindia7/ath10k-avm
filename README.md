@@ -128,10 +128,17 @@ The reasoning behind each change (what the Windows driver does, why the download
 ## Caveats
 
 - The modules go to `updates/` and **override the stock `ath10k_core/pci/sdio/usb` of your
-  kernel** for all ath10k hardware. The code is a v7.0.9 snapshot; on a different kernel it may
-  lack newer upstream fixes. Remove with `uninstall.sh` if you also use PCI/SDIO ath10k cards.
-- The ACK filter and the reset/pre-BMI sequences are restricted to USB devices (the reset
-  only to vendor `057c`); other ath10k hardware behaves like upstream.
+  kernel** for all ath10k hardware. All four are installed on purpose: the patched
+  `ath10k_core` has a different struct layout, so stock `ath10k_pci`/`ath10k_sdio` must not be
+  mixed with it. The code is a v7.0.9 snapshot; on a different kernel it may lack newer upstream
+  fixes. `install.sh` refuses to run if the machine has a PCI/SDIO ath10k device (override with
+  `--force`).
+- Every workaround (restart/keep-alive scheme, suspend option, completion FIFO, ACK thinning)
+  is gated on USB vendor `057c`; other ath10k devices, including other USB ones, keep the
+  upstream code paths.
+- Restarting the stick (every `down`, suspend, firmware recovery) waits ~2 s inside the driver
+  while holding `conf_mutex` and, on interface down, the RTNL lock; other network configuration
+  stalls for that time. Whether the wait is needed at all is untested.
 - Do not expect upstream acceptance: it is a workaround for one firmware, not a general fix.
 
 ## License
