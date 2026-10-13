@@ -16,6 +16,11 @@
 #include <linux/of.h>
 #include <linux/bitfield.h>
 #include <linux/random.h>
+#include <linux/ip.h>
+#include <linux/ipv6.h>
+#include <linux/tcp.h>
+#include <linux/jhash.h>
+#include <linux/if_ether.h>
 
 #include "hif.h"
 #include "core.h"
@@ -4396,6 +4401,120 @@ static u16 ath10k_mac_update_airtime(struct ath10k *ar,
 	return airtime;
 }
 
+/* Plain TCP ACK thinning, see ath10k_ack_thin in core.c. Returns true if the
+ * frame should be dropped. Only ACKs that carry no payload, no SACK option and
+ * are not a repeat of the previous ACK number of the same flow are eligible, so
+ * loss signalling (dup ACKs / SACK) and window updates always go out. The
+ * repeat check remembers one flow only; with several flows a duplicate ACK
+ * without SACK may be thinned like any other plain ACK.
+ */
+static bool ath10k_mac_ack_thin_drop(struct ath10k *ar, struct sk_buff *skb)
+{
+	static atomic_t counter = ATOMIC_INIT(0);
+	static u32 last_flow, last_ack;
+	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+	unsigned int n = READ_ONCE(ath10k_ack_thin);
+	unsigned int pend = READ_ONCE(ath10k_ack_thin_pending);
+	const u8 *p = skb->data;
+	unsigned int off, len = skb->len, ihl, thl, tot, i;
+	const struct tcphdr *th;
+	const u8 *opt;
+	__be16 proto;
+	u32 flow, ack;
+
+	if (n < 2 || ar->hif.bus != ATH10K_BUS_USB)
+		return false;
+	if (pend && READ_ONCE(ar->htt.num_pending_tx) < pend)
+		return false;
+
+	if (info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP) {
+		if (len < ETH_HLEN)
+			return false;
+		proto = ((const struct ethhdr *)p)->h_proto;
+		off = ETH_HLEN;
+	} else {
+		const struct ieee80211_hdr *hdr = (const void *)p;
+
+		if (len < 24 || !ieee80211_is_data_present(hdr->frame_control))
+			return false;
+		/* software-encrypted payload cannot be parsed */
+		if (ieee80211_has_protected(hdr->frame_control) &&
+		    !info->control.hw_key)
+			return false;
+		off = ieee80211_hdrlen(hdr->frame_control);
+		if (len < off + 8 + 20 ||
+		    p[off] != 0xaa || p[off + 1] != 0xaa || p[off + 2] != 0x03 ||
+		    p[off + 3] || p[off + 4] || p[off + 5])
+			return false;
+		proto = *(const __be16 *)(p + off + 6);
+		off += 8;
+	}
+
+	if (proto == htons(ETH_P_IP)) {
+		const struct iphdr *iph = (const void *)(p + off);
+
+		if (len < off + sizeof(*iph) || iph->protocol != IPPROTO_TCP ||
+		    (iph->frag_off & htons(0x2000 | 0x1fff)))
+			return false;
+		ihl = iph->ihl * 4;
+		tot = ntohs(iph->tot_len);
+		if (ihl < 20 || len < off + ihl + sizeof(*th))
+			return false;
+		th = (const void *)(p + off + ihl);
+		flow = jhash_3words((__force u32)iph->saddr,
+				    (__force u32)iph->daddr,
+				    ((__force u32)th->source << 16) |
+				    (__force u32)th->dest, 0);
+	} else if (proto == htons(ETH_P_IPV6)) {
+		const struct ipv6hdr *ip6 = (const void *)(p + off);
+
+		if (len < off + sizeof(*ip6) + sizeof(*th) ||
+		    ip6->nexthdr != IPPROTO_TCP)
+			return false;
+		ihl = sizeof(*ip6);
+		tot = ihl + ntohs(ip6->payload_len);
+		th = (const void *)(p + off + ihl);
+		flow = jhash(&ip6->saddr, 2 * sizeof(ip6->saddr),
+			     ((__force u32)th->source << 16) |
+			     (__force u32)th->dest);
+	} else {
+		return false;
+	}
+
+	thl = th->doff * 4;
+	if (thl < sizeof(*th) || tot != ihl + thl ||
+	    len < off + ihl + thl)
+		return false;
+	/* ACK flag only: no SYN/FIN/RST/PSH/URG/ECE/CWR */
+	if (((const u8 *)th)[13] != 0x10)
+		return false;
+
+	opt = (const u8 *)th + sizeof(*th);
+	for (i = 0; i < thl - sizeof(*th);) {
+		u8 kind = opt[i];
+
+		if (kind == 0)
+			break;
+		if (kind == 1) {
+			i++;
+			continue;
+		}
+		if (i + 1 >= thl - sizeof(*th) || opt[i + 1] < 2)
+			return false;
+		if (kind == 5)	/* SACK block present */
+			return false;
+		i += opt[i + 1];
+	}
+
+	ack = (__force u32)th->ack_seq;
+	if (READ_ONCE(last_flow) == flow && READ_ONCE(last_ack) == ack)
+		return false;	/* duplicate ACK / window update: keep */
+	WRITE_ONCE(last_flow, flow);
+	WRITE_ONCE(last_ack, ack);
+
+	return (unsigned int)atomic_inc_return(&counter) % n != 0;
+}
+
 int ath10k_mac_tx_push_txq(struct ieee80211_hw *hw,
 			   struct ieee80211_txq *txq)
 {
@@ -4427,6 +4546,15 @@ int ath10k_mac_tx_push_txq(struct ieee80211_hw *hw,
 		spin_unlock_bh(&ar->htt.tx_lock);
 
 		return -ENOENT;
+	}
+
+	if (unlikely(READ_ONCE(ath10k_ack_thin) >= 2) &&
+	    ath10k_mac_ack_thin_drop(ar, skb)) {
+		spin_lock_bh(&ar->htt.tx_lock);
+		ath10k_htt_tx_dec_pending(htt);
+		spin_unlock_bh(&ar->htt.tx_lock);
+		ieee80211_free_txskb(hw, skb);
+		return 0;
 	}
 
 	airtime = ath10k_mac_update_airtime(ar, txq, skb);

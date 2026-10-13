@@ -1008,6 +1008,9 @@ struct ath10k_bus_params {
 	bool hl_msdu_ids;
 };
 
+extern unsigned int ath10k_ack_thin;
+extern unsigned int ath10k_ack_thin_pending;
+
 struct ath10k {
 	struct ath_common ath_common;
 	struct ieee80211_hw *hw;

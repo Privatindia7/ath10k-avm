@@ -3337,6 +3337,19 @@ err:
 }
 EXPORT_SYMBOL(ath10k_core_start);
 
+/* TCP ACK thinning for the AVM USB stick (see ath10k_mac_ack_thin_drop()).
+ * Its firmware sends every TX frame on its own (no aggregation), so under
+ * download load the ACK rate caps TCP at ~30 Mbit/s. Keeping 1 of N plain
+ * ACKs lifts that to ~45 Mbit/s.
+ */
+unsigned int ath10k_ack_thin;
+module_param_named(ack_thin, ath10k_ack_thin, uint, 0644);
+MODULE_PARM_DESC(ack_thin, "USB: keep 1 of N plain TCP ACKs on TX (0/1 = off)");
+
+unsigned int ath10k_ack_thin_pending;
+module_param_named(ack_thin_pending, ath10k_ack_thin_pending, uint, 0644);
+MODULE_PARM_DESC(ack_thin_pending, "USB: thin ACKs only while this many frames are pending in the firmware (0 = always)");
+
 int ath10k_wait_for_suspend(struct ath10k *ar, u32 suspend_opt)
 {
 	int ret;
