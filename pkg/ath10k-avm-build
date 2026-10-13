@@ -1,0 +1,46 @@
+#!/bin/bash
+# Baut die gepatchten ath10k-Module (FRITZ!WLAN USB Stick AC 430) fuer einen Kernel und installiert sie.
+#   ath10k-avm-build [KVER]                    -> nach /lib/modules/KVER/updates/ath10k-avm/ + depmod
+#   ath10k-avm-build KVER --build-only OUTDIR  -> nur bauen, Module nach OUTDIR (kein root noetig)
+set -euo pipefail
+SRC="${AVM_SRC:-/usr/src/ath10k-avm}"
+KVER="${1:-$(uname -r)}"
+OUT=""
+[ "${2:-}" = "--build-only" ] && OUT="${3:?OUTDIR fehlt}"
+KDIR="/usr/src/kernels/$KVER"
+[ -d "$KDIR" ] || { echo "ath10k-avm: kernel-devel fuer $KVER fehlt ($KDIR)" >&2; exit 1; }
+[ -d "$SRC/drivers/net/wireless/ath/ath10k" ] || { echo "ath10k-avm: Quellen fehlen: $SRC" >&2; exit 1; }
+
+TMP="$(mktemp -d /var/tmp/ath10k-avm.XXXXXX)"
+trap 'rm -rf "$TMP"' EXIT
+cp -a "$SRC/." "$TMP/"
+D="$TMP/drivers/net/wireless/ath/ath10k"
+
+echo "ath10k-avm: baue fuer $KVER ..."
+make -C "$KDIR" M="$D" modules -j"$(nproc)" >"$TMP/build.log" 2>&1 || {
+	tail -30 "$TMP/build.log" >&2
+	echo "ath10k-avm: Build fuer $KVER fehlgeschlagen (Kernel-API geaendert? Quellen gegen diese Kernelversion pruefen)." >&2
+	exit 1
+}
+
+MODS="ath10k_core ath10k_usb ath10k_pci ath10k_sdio"
+for m in $MODS; do
+	[ -f "$D/$m.ko" ] || { echo "ath10k-avm: $m.ko fehlt" >&2; exit 1; }
+	strip --strip-debug "$D/$m.ko"
+	vm="$(modinfo -F vermagic "$D/$m.ko" | awk '{print $1}')"
+	[ "$vm" = "$KVER" ] || { echo "ath10k-avm: vermagic $vm != $KVER" >&2; exit 1; }
+done
+
+if [ -n "$OUT" ]; then
+	mkdir -p "$OUT"
+	for m in $MODS; do cp "$D/$m.ko" "$OUT/"; done
+	echo "ath10k-avm: Module in $OUT"
+	exit 0
+fi
+
+DEST="/lib/modules/$KVER/updates/ath10k-avm"
+install -d "$DEST"
+for m in $MODS; do install -m 0644 "$D/$m.ko" "$DEST/$m.ko"; done
+depmod -a "$KVER"
+command -v restorecon >/dev/null && restorecon -R "$DEST" || true
+echo "ath10k-avm: installiert nach $DEST (depmod fuer $KVER ok)"

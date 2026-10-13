@@ -1,0 +1,20 @@
+[Unit]
+Description=Build patched ath10k modules (AVM FRITZ!WLAN USB Stick AC 430) for the running kernel
+ConditionPathExists=!/lib/modules/%v/updates/ath10k-avm/ath10k_usb.ko
+ConditionPathExists=/usr/src/kernels/%v
+After=local-fs.target
+# Bewusst KEIN Before=systemd-udev-trigger.service / sysinit.target:
+# Der Dienst haengt an multi-user.target (Standard-Abhaengigkeiten, nach basic.target) und kann
+# den frueheren Boot nicht mehr blockieren. Die Version mit WantedBy=sysinit.target + Before=udev-trigger
+# erzeugte einen Ordering-Cycle -> systemd loeschte udev-trigger -> /boot nicht gefunden -> Emergency Mode.
+
+[Service]
+Type=oneshot
+TimeoutStartSec=20min
+Nice=10
+ExecStart=/usr/local/sbin/ath10k-avm-build %v
+# Modul nach dem Bauen laden, damit der Stick ohne Replug/Reboot erkannt wird
+ExecStartPost=-/usr/sbin/modprobe ath10k_usb
+
+[Install]
+WantedBy=multi-user.target
