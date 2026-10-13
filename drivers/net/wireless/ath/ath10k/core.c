@@ -3381,14 +3381,7 @@ void ath10k_core_stop(struct ath10k *ar)
 	/* try to suspend target */
 	if (ar->state != ATH10K_STATE_RESTARTING &&
 	    ar->state != ATH10K_STATE_UTF)
-		/* The AVM Windows driver suspends with WMI_PDEV_SUSPEND. With
-		 * ..._AND_DISABLE_INTR the USB diag endpoint stops answering
-		 * (-110) and the stick cannot be reset.
-		 */
-		ath10k_wait_for_suspend(ar,
-					ar->hif.bus == ATH10K_BUS_USB ?
-					WMI_PDEV_SUSPEND :
-					WMI_PDEV_SUSPEND_AND_DISABLE_INTR);
+		ath10k_wait_for_suspend(ar, ath10k_core_suspend_opt(ar));
 
 	ath10k_hif_stop(ar);
 	ath10k_htt_tx_stop(&ar->htt);
@@ -3548,7 +3541,7 @@ static int ath10k_core_probe_fw(struct ath10k *ar)
 
 	ath10k_debug_print_boot_info(ar);
 
-	if (ar->hif.bus == ATH10K_BUS_USB) {
+	if (ath10k_is_avm_usb(ar)) {
 		/* Chip restart needs a reset that re-enumerates the stick, so
 		 * a second boot is not possible without a new probe. Keep
 		 * this boot and let ath10k_start() adopt it.

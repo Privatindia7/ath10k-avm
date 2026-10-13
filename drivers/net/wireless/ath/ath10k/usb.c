@@ -711,7 +711,6 @@ static int ath10k_usb_hif_map_service_to_pipe(struct ath10k *ar, u16 svc_id,
  *    and re-enumerates after ~3 s, the driver then probes it again.
  *    No diag read and no USB bus reset before the write: both wedge the stick.
  */
-#define ATH10K_USB_AVM_VENDOR_ID	0x057c
 #define ATH10K_USB_AVM_PREBMI_ADDR	0x0020c700
 #define ATH10K_USB_AVM_PREBMI_CLR	BIT(22)
 #define ATH10K_USB_AVM_RESET_VAL	0x00000100
@@ -721,11 +720,6 @@ static int ath10k_usb_hif_map_service_to_pipe(struct ath10k *ar, u16 svc_id,
 /* Module static: ar is freed on disconnect, the history must survive that. */
 static unsigned long ath10k_usb_reset_window;
 static unsigned int ath10k_usb_reset_count;
-
-static bool ath10k_usb_is_avm(struct ath10k *ar)
-{
-	return ar->id.vendor == ATH10K_USB_AVM_VENDOR_ID;
-}
 
 static void ath10k_usb_avm_prebmi(struct ath10k *ar)
 {
@@ -788,7 +782,7 @@ static void ath10k_usb_avm_soc_reset(struct ath10k *ar)
 static int ath10k_usb_hif_power_up(struct ath10k *ar,
 				   enum ath10k_firmware_mode fw_mode)
 {
-	if (ath10k_usb_is_avm(ar))
+	if (ath10k_is_avm_usb(ar))
 		ath10k_usb_avm_prebmi(ar);
 
 	return 0;
@@ -798,7 +792,7 @@ static void ath10k_usb_hif_power_down(struct ath10k *ar)
 {
 	ath10k_usb_flush_all(ar);
 
-	if (ath10k_usb_is_avm(ar))
+	if (ath10k_is_avm_usb(ar))
 		ath10k_usb_avm_soc_reset(ar);
 }
 
@@ -1120,8 +1114,9 @@ static int ath10k_usb_probe(struct usb_interface *interface,
 		goto err;
 	ar_usb->ar = ar;
 
-	/* hw_params match uses dev_id; every USB chip is treated as QCA9377 */
-	ar->dev_id = QCA9377_1_0_DEVICE_ID;
+	/* hw_params match uses dev_id; the AVM stick is a QCA9377 */
+	ar->dev_id = vendor_id == ATH10K_AVM_USB_VENDOR_ID ?
+		     QCA9377_1_0_DEVICE_ID : product_id;
 	ar->id.vendor = vendor_id;
 	ar->id.device = product_id;
 

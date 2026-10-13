@@ -4422,7 +4422,7 @@ static bool ath10k_mac_ack_thin_drop(struct ath10k *ar, struct sk_buff *skb)
 	__be16 proto;
 	u32 flow, ack;
 
-	if (n < 2 || ar->hif.bus != ATH10K_BUS_USB)
+	if (n < 2 || !ath10k_is_avm_usb(ar))
 		return false;
 	if (pend && READ_ONCE(ar->htt.num_pending_tx) < pend)
 		return false;
@@ -5550,7 +5550,7 @@ static void ath10k_stop(struct ieee80211_hw *hw, bool suspend)
 				 * state, ath10k_core_stop() skips
 				 * ath10k_wait_for_suspend().
 				 */
-				opt = WMI_PDEV_SUSPEND_AND_DISABLE_INTR;
+				opt = ath10k_core_suspend_opt(ar);
 				ath10k_wait_for_suspend(ar, opt);
 			}
 		}

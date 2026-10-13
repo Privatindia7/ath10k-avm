@@ -542,7 +542,7 @@ int ath10k_htt_tx_start(struct ath10k_htt *htt)
 	idr_init(&htt->pending_tx);
 
 	if (!htt->hl_fifo_ok && ar->bus_param.dev_type == ATH10K_DEV_TYPE_HL &&
-	    ar->hif.bus == ATH10K_BUS_USB &&
+	    ath10k_is_avm_usb(ar) &&
 	    !kfifo_alloc(&htt->hl_fifo, ATH10K_HTT_HL_FIFO_SIZE, GFP_KERNEL))
 		htt->hl_fifo_ok = true;
 

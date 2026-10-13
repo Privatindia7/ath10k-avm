@@ -1336,6 +1336,28 @@ struct ath10k {
 	u8 drv_priv[] __aligned(sizeof(void *));
 };
 
+/* The restart scheme, the TX completion FIFO, the suspend option and ACK
+ * thinning are workarounds for the AVM FRITZ!WLAN USB stick; other USB devices
+ * keep the upstream behaviour.
+ */
+#define ATH10K_AVM_USB_VENDOR_ID	0x057c
+
+static inline bool ath10k_is_avm_usb(struct ath10k *ar)
+{
+	return ar->hif.bus == ATH10K_BUS_USB &&
+	       ar->id.vendor == ATH10K_AVM_USB_VENDOR_ID;
+}
+
+/* The AVM firmware only works with WMI_PDEV_SUSPEND: after the upstream
+ * ..._AND_DISABLE_INTR the USB diag endpoint stops answering (-110) and the
+ * stick cannot be reset.
+ */
+static inline u32 ath10k_core_suspend_opt(struct ath10k *ar)
+{
+	return ath10k_is_avm_usb(ar) ? WMI_PDEV_SUSPEND :
+				       WMI_PDEV_SUSPEND_AND_DISABLE_INTR;
+}
+
 static inline bool ath10k_peer_stats_enabled(struct ath10k *ar)
 {
 	if (test_bit(ATH10K_FLAG_PEER_STATS, &ar->dev_flags) &&
