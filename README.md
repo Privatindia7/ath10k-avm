@@ -20,14 +20,20 @@ Tested on **Fedora 44 / Nobara 44, kernel 7.2.9, x86_64, NetworkManager, one FRI
 - scan, associate (**5 GHz only**), DHCP, normal use as a station; encrypted connection with
   management frame protection
 - `nmcli radio wifi off/on`, `ip link set wlan0 down/up`, module reload, reboot, autoload
+  (90+ restart cycles without a failure, ~7 s each)
+- With the Windows driver the stick first shows up as a USB storage device (`057c:62ff`); on
+  Linux it switches to `057c:8602` by itself within about a second, no `usb_modeswitch` needed
 - rebuild of the modules by a systemd service after a kernel update (verified once)
-- TCP download with `ack_thin=2`: **~40 Mbit/s on average, 32–49 Mbit/s observed** (without the
-  filter 26–33 Mbit/s, same signal, alternating runs: +41 %; 49 Mbit/s at −55 dBm, which is
-  the DSL line limit). The test DSL line syncs at
-  53.7 Mbit/s and UDP download reaches 47.8 Mbit/s, so the line is the limit. Upload is at the
-  line limit (~9.5–10 Mbit/s). A few runs showed TCP retransmissions with the filter on
-  (up to ~1 % at weaker signal, ~5 % with four parallel streams that fill the DSL line; ~0 with
-  the filter off, where the stick is the bottleneck). Not separated from plain line saturation.
+- TCP download with `ack_thin=2`: **40–49 Mbit/s when the line is quiet** (26–33 Mbit/s without
+  the filter, same signal, alternating runs: +41 %). The test DSL line syncs at 53.7 Mbit/s and
+  UDP download reaches 47.8 Mbit/s, so the line is the limit. Upload is at the line limit
+  (~7–10 Mbit/s).
+- In the evening the same setup dropped to 28–37 Mbit/s with 1–5 % packet loss in bursts. The
+  loss also happens with UDP (no ACKs involved), the driver counters show no drops, and ping
+  to the router stays clean, so it is most likely the line or the radio environment (not
+  proven; the filter does not cause spurious retransmissions: no DSACKs are received). With the
+  filter on, TCP shows more retransmissions than with it off simply because the stick is no
+  longer the bottleneck.
 - CPU: ~1 % of one core at 45 Mbit/s; memory: about 1 MB (module 0.83 MB plus buffers)
 
 ## What does not work / not known
@@ -66,7 +72,8 @@ Tested on **Fedora 44 / Nobara 44, kernel 7.2.9, x86_64, NetworkManager, one FRI
 
 ## Requirements
 
-- Kernel headers/devel for the running kernel (`/lib/modules/$(uname -r)/build`), `make`, `gcc`
+- Kernel headers/devel for the running kernel (`/lib/modules/$(uname -r)/build`), `make`, `gcc`,
+  `python3` (only for the firmware conversion)
 - Secure Boot off, or sign the modules yourself (they are unsigned out-of-tree modules)
 - The firmware files (below)
 - NetworkManager is optional; `pkg/nm-avm-managed.conf` disables MAC randomization for the stick
@@ -118,8 +125,9 @@ retransmissions increase strongly, so 2 is the useful value.
 
 ## How it works
 
-`main` is the unmodified `drivers/net/wireless/ath/{*.h,ath10k/}` of Linux v7.0.9;
-`avm-usb` holds the changes (`git diff main avm-usb`, ~450 lines), one commit each:
+The first commit (tag `upstream-v7.0.9`) imports the unmodified
+`drivers/net/wireless/ath/{*.h,ath10k/}` of Linux v7.0.9; everything after it is the change
+(`git diff upstream-v7.0.9 main -- drivers`, ~450 lines of driver code), one commit per topic:
 
 1. **USB device**: USB ID, `hw_params` entry (firmware dir `QCA9377/avm`), restart scheme. A
    second firmware boot is impossible without a chip reset and the reset re-enumerates the
