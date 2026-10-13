@@ -34,6 +34,11 @@ Tested on **Fedora 44 / Nobara 44, kernel 7.2.9, x86_64, NetworkManager, one FRI
   proven; the filter does not cause spurious retransmissions: no DSACKs are received). With the
   filter on, TCP shows more retransmissions than with it off simply because the stick is no
   longer the bottleneck.
+- Comparison with the AVM Windows driver (same stick, same PC, same line, one Cloudflare speed
+  test run each, about 5 minutes apart): download 41 vs 40.7 Mbit/s, upload 9.75 vs 9.6 Mbit/s,
+  idle latency 8.8 vs 11.7 ms, jitter 3.3 vs 3.5 ms, packet loss 0 % on both. Throughput is on
+  par; the difference is the latency under download load (see below). Single runs, no spread
+  measured.
 - CPU: ~1 % of one core at 45 Mbit/s; memory: about 1 MB (module 0.83 MB plus buffers)
 
 ## What does not work / not known
@@ -56,7 +61,13 @@ Tested on **Fedora 44 / Nobara 44, kernel 7.2.9, x86_64, NetworkManager, one FRI
   this; a faster line may expose other limits.
 - **Latency under load.** With a large download running, ping to the router rises from ~2 ms to
   35–60 ms (queue inside the firmware, spikes up to ~400 ms seen). Idle and light traffic
-  (voice, games on their own) are fine: ~8 ms to the internet, no loss.
+  (voice, games on their own) are fine: ~8 ms to the internet, no loss. The Cloudflare speed
+  test shows the same effect in numbers: latency during the download 32.7 ms and jitter during
+  the download 17.5 ms on Linux, against 11.8 ms and 4.3 ms with the Windows driver in the
+  back-to-back run (single runs, outliers above 100 ms on Linux, about 30 ms at most on
+  Windows). Latency and jitter during upload are on par (9.8 vs 8.9 ms). This is the only
+  visible difference to the Windows driver in these runs; the queue in the firmware is the
+  likely cause, but that is not verified.
 - **Every `down` resets the stick.** It re-enumerates and `wlan0` reappears after ~4–6 s
   (NetworkManager reconnects by itself). Do not expect an instant `down`/`up`.
 - The HL completion FIFO skips stale entries by comparing the `skb` pointer with the one stored
