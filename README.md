@@ -17,8 +17,11 @@ Tested on **Fedora 44 / Nobara 44, kernel 7.2.9, x86_64, NetworkManager, one FRI
   protection
 - `nmcli radio wifi off/on`, `ip link set wlan0 down/up`, module reload, reboot, autoload
 - rebuild of the modules by a systemd service after a kernel update (verified once)
-- TCP download **~40–45 Mbit/s** (line limited, the test DSL line syncs at 53.7 Mbit/s; UDP
-  download reaches 47.8 Mbit/s = line limit), upload at the line limit (~9.5–10 Mbit/s)
+- TCP download with `ack_thin=2`: **~40 Mbit/s on average, 32–47 Mbit/s observed** (without the
+  filter 26–33 Mbit/s, same signal, alternating runs: +41 %). The test DSL line syncs at
+  53.7 Mbit/s and UDP download reaches 47.8 Mbit/s, so the line is the limit. Upload is at the
+  line limit (~9.5–10 Mbit/s). At weaker signal (−61 dBm) a few runs showed up to ~1 %
+  TCP retransmissions with the filter on (~0 with it off, where the stick is the bottleneck).
 - CPU: ~1 % of one core at 45 Mbit/s; memory: about 1 MB (module 0.83 MB plus buffers)
 
 ## What does not / not known
