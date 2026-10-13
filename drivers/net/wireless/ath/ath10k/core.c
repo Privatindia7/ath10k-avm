@@ -2505,6 +2505,12 @@ static int ath10k_init_hw_params(struct ath10k *ar)
 	for (i = 0; i < ARRAY_SIZE(ath10k_hw_params_list); i++) {
 		hw_params = &ath10k_hw_params_list[i];
 
+		/* The only USB row describes the AVM stick (own firmware
+		 * directory); other USB devices must not match it.
+		 */
+		if (hw_params->bus == ATH10K_BUS_USB && !ath10k_is_avm_usb(ar))
+			continue;
+
 		if (hw_params->bus == ar->hif.bus &&
 		    hw_params->id == ar->target_version &&
 		    hw_params->dev_id == ar->dev_id)

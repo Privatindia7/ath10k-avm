@@ -53,7 +53,8 @@ Tested on **Fedora 44 / Nobara 44, kernel 7.2.9, x86_64, NetworkManager, one FRI
   (voice, games on their own) are fine: ~8 ms to the internet, no loss.
 - **Every `down` resets the stick.** It re-enumerates and `wlan0` reappears after ~4–6 s
   (NetworkManager reconnects by itself). Do not expect an instant `down`/`up`.
-- The driver refuses more than 6 stick resets per minute (loop guard against reset loops).
+- The driver refuses more than 6 stick resets per minute (loop guard against reset loops). The
+  budget is module wide, so two sticks at once would share it (multiple sticks are untested).
 - Unloading the module while the interface is up logs `failed to delete WMI vdev -22` (the stick
   is already suspended at that point); harmless as far as observed, not investigated.
 

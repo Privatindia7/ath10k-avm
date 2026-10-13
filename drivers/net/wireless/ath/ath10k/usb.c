@@ -719,7 +719,10 @@ static int ath10k_usb_hif_map_service_to_pipe(struct ath10k *ar, u16 svc_id,
 #define ATH10K_USB_AVM_RESET_VAL	0x00000100
 #define ATH10K_USB_AVM_RESET_MAX	6	/* per 60 s, loop guard */
 
-/* Module static: ar is freed on disconnect, the history must survive that. */
+/* Module static on purpose: every reset re-probes the stick with a new ar_usb,
+ * so a per-device counter would start from zero each time and never stop a
+ * reset loop. The budget is therefore shared by all sticks.
+ */
 static unsigned long ath10k_usb_reset_window;
 static unsigned int ath10k_usb_reset_count;
 
