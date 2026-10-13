@@ -7,6 +7,7 @@
 
 #include <linux/module.h>
 #include <linux/usb.h>
+#include <linux/delay.h>
 
 #include "debug.h"
 #include "core.h"
@@ -701,15 +702,104 @@ static int ath10k_usb_hif_map_service_to_pipe(struct ath10k *ar, u16 svc_id,
 	return 0;
 }
 
+/* AVM FRITZ!WLAN USB Stick AC 430 MU-MIMO (057c:8602) restart support.
+ *
+ * Sequences copied from USBPcap traces of the AVM Windows driver 11.3.4.0:
+ *  - before BMI: diag read 0x0020c700, clear bit 22 (0x00600808 -> 0x00200808)
+ *  - on disable: WMI pdev suspend (core), ~2 s idle, then diag write
+ *    RTC_SOC_BASE + SOC_RESET_CONTROL = 0x100. The stick disconnects by itself
+ *    and re-enumerates after ~3 s, the driver then probes it again.
+ *    No diag read and no USB bus reset before the write: both wedge the stick.
+ */
+#define ATH10K_USB_AVM_VENDOR_ID	0x057c
+#define ATH10K_USB_AVM_PREBMI_ADDR	0x0020c700
+#define ATH10K_USB_AVM_PREBMI_CLR	BIT(22)
+#define ATH10K_USB_AVM_RESET_VAL	0x00000100
+#define ATH10K_USB_AVM_RESET_IDLE_MS	2000
+#define ATH10K_USB_AVM_RESET_MAX	6	/* per 60 s, loop guard */
+
+/* Module static: ar is freed on disconnect, the history must survive that. */
+static unsigned long ath10k_usb_reset_window;
+static unsigned int ath10k_usb_reset_count;
+
+static bool ath10k_usb_is_avm(struct ath10k *ar)
+{
+	return ar->id.vendor == ATH10K_USB_AVM_VENDOR_ID;
+}
+
+static void ath10k_usb_avm_prebmi(struct ath10k *ar)
+{
+	__le32 val;
+	int ret = -EINVAL, i;
+
+	for (i = 0; i < 3; i++) {
+		ret = ath10k_usb_hif_diag_read(ar, ATH10K_USB_AVM_PREBMI_ADDR,
+					       &val, sizeof(val));
+		if (!ret)
+			break;
+		msleep(150);
+	}
+	if (ret) {
+		ath10k_warn(ar, "usb pre-bmi: diag read failed: %d (ignored)\n",
+			    ret);
+		return;
+	}
+
+	if (!(le32_to_cpu(val) & ATH10K_USB_AVM_PREBMI_CLR))
+		return;
+
+	val = cpu_to_le32(le32_to_cpu(val) & ~ATH10K_USB_AVM_PREBMI_CLR);
+	ret = ath10k_usb_hif_diag_write(ar, ATH10K_USB_AVM_PREBMI_ADDR, &val,
+					sizeof(val));
+	if (ret)
+		ath10k_warn(ar, "usb pre-bmi: diag write failed: %d (ignored)\n",
+			    ret);
+}
+
+static void ath10k_usb_avm_soc_reset(struct ath10k *ar)
+{
+	struct ath10k_usb *ar_usb = ath10k_usb_priv(ar);
+	__le32 val = cpu_to_le32(ATH10K_USB_AVM_RESET_VAL);
+	int ret;
+
+	if (ar_usb->udev->state == USB_STATE_NOTATTACHED)
+		return;
+
+	/* a reset re-probes the stick; never let that turn into a loop */
+	if (time_after(jiffies, ath10k_usb_reset_window + 60 * HZ)) {
+		ath10k_usb_reset_window = jiffies;
+		ath10k_usb_reset_count = 0;
+	}
+	if (++ath10k_usb_reset_count > ATH10K_USB_AVM_RESET_MAX) {
+		ath10k_warn(ar, "usb soc reset skipped: loop guard\n");
+		return;
+	}
+
+	/* Windows idles ~2 s between the suspend and the reset write */
+	msleep(ATH10K_USB_AVM_RESET_IDLE_MS);
+
+	ret = ath10k_usb_hif_diag_write(ar, RTC_SOC_BASE_ADDRESS +
+					    SOC_RESET_CONTROL_ADDRESS,
+					&val, sizeof(val));
+	if (ret && ret != -ENODEV)
+		ath10k_warn(ar, "usb soc reset: diag write failed: %d\n", ret);
+}
+
 static int ath10k_usb_hif_power_up(struct ath10k *ar,
 				   enum ath10k_firmware_mode fw_mode)
 {
+	if (ath10k_usb_is_avm(ar))
+		ath10k_usb_avm_prebmi(ar);
+
 	return 0;
 }
 
 static void ath10k_usb_hif_power_down(struct ath10k *ar)
 {
 	ath10k_usb_flush_all(ar);
+
+	if (ath10k_usb_is_avm(ar))
+		ath10k_usb_avm_soc_reset(ar);
 }
 
 #ifdef CONFIG_PM
@@ -1030,7 +1120,8 @@ static int ath10k_usb_probe(struct usb_interface *interface,
 		goto err;
 	ar_usb->ar = ar;
 
-	ar->dev_id = product_id;
+	/* hw_params match uses dev_id; every USB chip is treated as QCA9377 */
+	ar->dev_id = QCA9377_1_0_DEVICE_ID;
 	ar->id.vendor = vendor_id;
 	ar->id.device = product_id;
 
@@ -1107,6 +1198,7 @@ static int ath10k_usb_pm_resume(struct usb_interface *interface)
 /* table of devices that work with this driver */
 static struct usb_device_id ath10k_usb_ids[] = {
 	{USB_DEVICE(0x13b1, 0x0042)}, /* Linksys WUSB6100M */
+	{USB_DEVICE(0x057c, 0x8602)}, /* AVM FRITZ!WLAN USB Stick AC 430 MU-MIMO */
 	{ /* Terminating entry */ },
 };
 

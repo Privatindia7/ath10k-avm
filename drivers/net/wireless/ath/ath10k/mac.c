@@ -5221,17 +5221,23 @@ static int ath10k_start(struct ieee80211_hw *hw)
 
 	spin_unlock_bh(&ar->data_lock);
 
-	ret = ath10k_hif_power_up(ar, ATH10K_FIRMWARE_MODE_NORMAL);
-	if (ret) {
-		ath10k_err(ar, "Could not init hif: %d\n", ret);
-		goto err_off;
-	}
+	if (ar->fw_kept_alive) {
+		/* USB: adopt the firmware booted at probe time */
+		ath10k_info(ar, "usb: adopting running firmware\n");
+		ar->fw_kept_alive = false;
+	} else {
+		ret = ath10k_hif_power_up(ar, ATH10K_FIRMWARE_MODE_NORMAL);
+		if (ret) {
+			ath10k_err(ar, "Could not init hif: %d\n", ret);
+			goto err_off;
+		}
 
-	ret = ath10k_core_start(ar, ATH10K_FIRMWARE_MODE_NORMAL,
-				&ar->normal_mode_fw);
-	if (ret) {
-		ath10k_err(ar, "Could not init core: %d\n", ret);
-		goto err_power_down;
+		ret = ath10k_core_start(ar, ATH10K_FIRMWARE_MODE_NORMAL,
+					&ar->normal_mode_fw);
+		if (ret) {
+			ath10k_err(ar, "Could not init core: %d\n", ret);
+			goto err_power_down;
+		}
 	}
 
 	if (ar->sys_cap_info & WMI_TLV_SYS_CAP_INFO_RFKILL) {

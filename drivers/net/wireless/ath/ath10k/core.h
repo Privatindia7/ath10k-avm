@@ -1205,6 +1205,11 @@ struct ath10k {
 
 	enum ath10k_state state;
 
+	/* USB (AVM): firmware booted at probe is kept running and adopted by
+	 * ath10k_start() instead of booting a second time
+	 */
+	bool fw_kept_alive;
+
 	struct work_struct register_work;
 	struct work_struct restart_work;
 	struct work_struct recovery_check_work;
