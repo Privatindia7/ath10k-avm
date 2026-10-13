@@ -1,7 +1,7 @@
 [Unit]
 Description=Build patched ath10k modules (AVM FRITZ!WLAN USB Stick AC 430) for the running kernel
 ConditionPathExists=!/lib/modules/%v/updates/ath10k-avm/ath10k_usb.ko
-ConditionPathExists=/usr/src/kernels/%v
+ConditionPathExists=/lib/modules/%v/build
 After=local-fs.target
 # Bewusst KEIN Before=systemd-udev-trigger.service / sysinit.target:
 # Der Dienst haengt an multi-user.target (Standard-Abhaengigkeiten, nach basic.target) und kann

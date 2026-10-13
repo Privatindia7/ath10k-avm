@@ -9,7 +9,7 @@ A=drivers/net/wireless/ath
 FW=/lib/firmware/ath10k/QCA9377/avm
 
 if [ ! -f "$FW/firmware-usb-5.bin" ] || [ ! -f "$FW/board.bin" ]; then
-	echo "Firmware fehlt in $FW (firmware-usb-5.bin, board.bin; siehe README)" >&2
+	echo "Firmware missing in $FW (firmware-usb-5.bin, board.bin): create it with tools/make-firmware.py, see README" >&2
 	exit 1
 fi
 

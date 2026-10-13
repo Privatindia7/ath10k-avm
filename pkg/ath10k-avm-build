@@ -7,8 +7,8 @@ SRC="${AVM_SRC:-/usr/src/ath10k-avm}"
 KVER="${1:-$(uname -r)}"
 OUT=""
 [ "${2:-}" = "--build-only" ] && OUT="${3:?OUTDIR fehlt}"
-KDIR="/usr/src/kernels/$KVER"
-[ -d "$KDIR" ] || { echo "ath10k-avm: kernel-devel fuer $KVER fehlt ($KDIR)" >&2; exit 1; }
+KDIR="/lib/modules/$KVER/build"
+[ -d "$KDIR" ] || { echo "ath10k-avm: Kernel-Header/-devel fuer $KVER fehlen ($KDIR)" >&2; exit 1; }
 [ -d "$SRC/drivers/net/wireless/ath/ath10k" ] || { echo "ath10k-avm: Quellen fehlen: $SRC" >&2; exit 1; }
 
 TMP="$(mktemp -d /var/tmp/ath10k-avm.XXXXXX)"
