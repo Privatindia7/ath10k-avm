@@ -2991,6 +2991,13 @@ static void ath10k_htt_rx_tx_compl_ind(struct ath10k *ar,
 		msdu_id = msdus[i];
 		tx_done.msdu_id = __le16_to_cpu(msdu_id);
 
+		/* AVM FW: bogus msdu ids, see struct ath10k_htt::hl_fifo. An
+		 * empty FIFO means a completion for a FW internal frame.
+		 */
+		if (htt->hl_fifo_ok &&
+		    !ath10k_htt_hl_fifo_pop(htt, &tx_done.msdu_id))
+			continue;
+
 		if (rssi_enabled) {
 			/* Total no of MSDUs should be even,
 			 * if odd MSDUs are sent firmware fills
@@ -4090,6 +4097,9 @@ bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
 		return true;
 	}
 	type = ar->htt.t2h_msg_types[resp->hdr.msg_type];
+
+	if (htt->hl_fifo_ok)
+		ath10k_htt_hl_fifo_expire(htt);
 
 	switch (type) {
 	case HTT_T2H_MSG_TYPE_VERSION_CONF: {

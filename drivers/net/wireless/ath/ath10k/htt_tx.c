@@ -142,6 +142,61 @@ void ath10k_htt_tx_txq_update(struct ieee80211_hw *hw,
 	spin_unlock_bh(&ar->htt.tx_lock);
 }
 
+/* Frames whose completion did not arrive within this time are given up on, so
+ * that a lost completion cannot leak pending slots (and stall tx) forever.
+ */
+#define ATH10K_HTT_HL_FIFO_SIZE		2048
+#define ATH10K_HTT_HL_FIFO_EXPIRE	(2 * HZ)
+
+/* Returns the msdu_id of the oldest in-flight data frame. Entries that are no
+ * longer pending (freed on another path) are skipped.
+ */
+bool ath10k_htt_hl_fifo_pop(struct ath10k_htt *htt, u16 *id)
+{
+	struct ath10k_htt_hl_ent e;
+	bool ok = false;
+
+	spin_lock_bh(&htt->tx_lock);
+	while (kfifo_out(&htt->hl_fifo, &e, 1)) {
+		if (idr_find(&htt->pending_tx, e.id) == e.skb) {
+			*id = e.id;
+			ok = true;
+			break;
+		}
+	}
+	spin_unlock_bh(&htt->tx_lock);
+
+	return ok;
+}
+
+void ath10k_htt_hl_fifo_expire(struct ath10k_htt *htt)
+{
+	struct ath10k *ar = htt->ar;
+	struct ath10k_htt_hl_ent e;
+	struct htt_tx_done tx_done = {};
+	int n;
+
+	for (n = 0; n < 16; n++) {
+		spin_lock_bh(&htt->tx_lock);
+		if (!kfifo_peek(&htt->hl_fifo, &e) ||
+		    !time_after(jiffies, e.jiffies + ATH10K_HTT_HL_FIFO_EXPIRE)) {
+			spin_unlock_bh(&htt->tx_lock);
+			return;
+		}
+		kfifo_skip(&htt->hl_fifo);
+		if (idr_find(&htt->pending_tx, e.id) != e.skb) {
+			spin_unlock_bh(&htt->tx_lock);
+			continue;
+		}
+		spin_unlock_bh(&htt->tx_lock);
+
+		ath10k_warn(ar, "tx completion lost for msdu_id %u, giving up\n", e.id);
+		tx_done.msdu_id = e.id;
+		tx_done.status = HTT_TX_COMPL_STATE_DISCARD;
+		ath10k_txrx_tx_unref(htt, &tx_done);
+	}
+}
+
 void ath10k_htt_tx_dec_pending(struct ath10k_htt *htt)
 {
 	lockdep_assert_held(&htt->tx_lock);
@@ -486,6 +541,11 @@ int ath10k_htt_tx_start(struct ath10k_htt *htt)
 	spin_lock_init(&htt->tx_lock);
 	idr_init(&htt->pending_tx);
 
+	if (!htt->hl_fifo_ok && ar->bus_param.dev_type == ATH10K_DEV_TYPE_HL &&
+	    ar->hif.bus == ATH10K_BUS_USB &&
+	    !kfifo_alloc(&htt->hl_fifo, ATH10K_HTT_HL_FIFO_SIZE, GFP_KERNEL))
+		htt->hl_fifo_ok = true;
+
 	if (htt->tx_mem_allocated)
 		return 0;
 
@@ -524,6 +584,11 @@ static int ath10k_htt_tx_clean_up_pending(int msdu_id, void *skb, void *ctx)
 
 void ath10k_htt_tx_destroy(struct ath10k_htt *htt)
 {
+	if (htt->hl_fifo_ok) {
+		htt->hl_fifo_ok = false;
+		kfifo_free(&htt->hl_fifo);
+	}
+
 	if (!htt->tx_mem_allocated)
 		return;
 
@@ -543,6 +608,11 @@ static void ath10k_htt_flush_tx_queue(struct ath10k_htt *htt)
 void ath10k_htt_tx_stop(struct ath10k_htt *htt)
 {
 	ath10k_htt_flush_tx_queue(htt);
+	if (htt->hl_fifo_ok) {
+		spin_lock_bh(&htt->tx_lock);
+		kfifo_reset(&htt->hl_fifo);
+		spin_unlock_bh(&htt->tx_lock);
+	}
 	idr_destroy(&htt->pending_tx);
 }
 
@@ -1351,6 +1421,17 @@ static int ath10k_htt_tx_hl(struct ath10k_htt *htt, enum ath10k_hw_txrx_mode txm
 			goto out;
 		}
 		msdu_id = res;
+
+		if (txmode != ATH10K_HW_TXRX_MGMT && htt->hl_fifo_ok) {
+			struct ath10k_htt_hl_ent ent = {
+				.skb = msdu, .jiffies = jiffies, .id = msdu_id,
+			};
+
+			spin_lock_bh(&htt->tx_lock);
+			if (!kfifo_in(&htt->hl_fifo, &ent, 1))
+				ath10k_warn(ar, "hl tx fifo full, msdu_id %u\n", msdu_id);
+			spin_unlock_bh(&htt->tx_lock);
+		}
 	}
 
 	/* As msdu is freed by mac80211 (in ieee80211_tx_status()) and by
@@ -1377,6 +1458,11 @@ static int ath10k_htt_tx_hl(struct ath10k_htt *htt, enum ath10k_hw_txrx_mode txm
 	tx_desc->peerid = __cpu_to_le32(HTT_INVALID_PEERID);
 
 	res = ath10k_htc_send_hl(&htt->ar->htc, htt->eid, msdu);
+	if (res && ar->bus_param.hl_msdu_ids) {
+		spin_lock_bh(&htt->tx_lock);
+		ath10k_htt_tx_free_msdu_id(htt, msdu_id);
+		spin_unlock_bh(&htt->tx_lock);
+	}
 
 out:
 	return res;

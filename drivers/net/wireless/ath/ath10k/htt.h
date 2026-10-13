@@ -1769,6 +1769,13 @@ struct ath10k_htt_txbuf_64 {
 	struct htt_data_tx_desc_64 cmd_tx;
 } __packed __aligned(4);
 
+/* One in-flight HL data frame, see ath10k_htt_hl_fifo_*() in htt_tx.c */
+struct ath10k_htt_hl_ent {
+	struct sk_buff *skb;
+	unsigned long jiffies;
+	u16 id;
+};
+
 struct ath10k_htt {
 	struct ath10k *ar;
 	enum ath10k_htc_ep_id eid;
@@ -1873,6 +1880,15 @@ struct ath10k_htt {
 	int num_pending_mgmt_tx;
 	struct idr pending_tx;
 	wait_queue_head_t empty_tx_wq;
+
+	/* The AVM FRITZ!WLAN USB firmware does not echo the msdu_id of HL data
+	 * frames in HTT_T2H_MSG_TYPE_TX_COMPL_IND (always 10/11), so the ids are
+	 * useless. It sends exactly one completion per data frame, in order, so
+	 * completions are matched against this FIFO of in-flight frames instead.
+	 * Protected by tx_lock.
+	 */
+	DECLARE_KFIFO_PTR(hl_fifo, struct ath10k_htt_hl_ent);
+	bool hl_fifo_ok;
 
 	/* FIFO for storing tx done status {ack, no-ack, discard} and msdu id */
 	DECLARE_KFIFO_PTR(txdone_fifo, struct htt_tx_done);
@@ -2449,6 +2465,8 @@ void ath10k_htt_tx_txq_recalc(struct ieee80211_hw *hw,
 void ath10k_htt_tx_txq_sync(struct ath10k *ar);
 void ath10k_htt_tx_dec_pending(struct ath10k_htt *htt);
 int ath10k_htt_tx_inc_pending(struct ath10k_htt *htt);
+bool ath10k_htt_hl_fifo_pop(struct ath10k_htt *htt, u16 *id);
+void ath10k_htt_hl_fifo_expire(struct ath10k_htt *htt);
 void ath10k_htt_tx_mgmt_dec_pending(struct ath10k_htt *htt);
 int ath10k_htt_tx_mgmt_inc_pending(struct ath10k_htt *htt, bool is_mgmt,
 				   bool is_presp);
